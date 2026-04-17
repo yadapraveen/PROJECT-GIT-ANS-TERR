@@ -4,7 +4,9 @@ provider "aws" {
 
 # Security Group
 resource "aws_security_group" "sg" {
-  name = "devops-sg"
+  name        = "devops-sg"
+  description = "Allow SSH, HTTP, and app port"
+  vpc_id      = var.vpc_id
 
   ingress {
     description = "SSH"
@@ -36,14 +38,20 @@ resource "aws_security_group" "sg" {
     protocol    = "-1"
     cidr_blocks = ["0.0.0.0/0"]
   }
+
+  tags = {
+    Name = "devops-sg"
+  }
 }
 
 # Master Instance
 resource "aws_instance" "master" {
-  ami             = var.ami_id
-  instance_type   = var.instance_type
-  key_name        = var.key_name
-  security_groups = [aws_security_group.sg.name]
+  ami                         = var.ami_id
+  instance_type               = var.instance_type
+  key_name                    = var.key_name
+  subnet_id                   = var.master_subnet_id
+  vpc_security_group_ids      = [aws_security_group.sg.id]
+  associate_public_ip_address = true
 
   tags = {
     Name = "master"
@@ -53,14 +61,16 @@ resource "aws_instance" "master" {
 
 # Slave Instances
 resource "aws_instance" "slaves" {
-  count           = var.slave_count
-  ami             = var.ami_id
-  instance_type   = var.instance_type
-  key_name        = var.key_name
-  security_groups = [aws_security_group.sg.name]
+  count                       = var.slave_count
+  ami                         = var.ami_id
+  instance_type               = var.instance_type
+  key_name                    = var.key_name
+  subnet_id                   = var.slave_subnet_ids[count.index]
+  vpc_security_group_ids      = [aws_security_group.sg.id]
+  associate_public_ip_address = true
 
   tags = {
-    Name = "slave-${count.index}"
+    Name = "slave-${count.index + 1}"
     Role = "slave"
   }
 }

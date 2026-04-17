@@ -22,3 +22,18 @@ variable "slave_count" {
   description = "Number of slave instances"
   default     = 2
 }
+
+variable "vpc_id" {
+  description = "VPC ID where instances will be launched"
+  type        = string
+}
+
+variable "master_subnet_id" {
+  description = "Subnet ID for master instance"
+  type        = string
+}
+
+variable "slave_subnet_ids" {
+  description = "Subnet IDs for slave instances"
+  type        = list(string)
+}
