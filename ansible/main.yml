@@ -1,0 +1,93 @@
+- name: Setup all servers
+  hosts: all
+  become: yes
+
+  tasks:
+
+    - name: Install system packages
+      apt:
+        name:
+          - python3
+          - python3-pip
+          - python3-venv
+          - git
+          - curl
+        state: present
+        update_cache: yes
+
+    - name: Install nginx
+      apt:
+        name: nginx
+        state: present
+
+    - name: Start nginx
+      service:
+        name: nginx
+        state: started
+        enabled: yes
+
+    - name: Configure nginx reverse proxy
+      copy:
+        dest: /etc/nginx/sites-available/default
+        content: |
+          server {
+              listen 80;
+
+              location / {
+                  proxy_pass http://localhost:8080;
+                  proxy_set_header Host $host;
+                  proxy_set_header X-Real-IP $remote_addr;
+              }
+          }
+
+    - name: Restart nginx
+      service:
+        name: nginx
+        state: restarted
+
+
+- name: Deploy Python app on slaves
+  hosts: slave
+  become: yes
+
+  tasks:
+
+    - name: Create app directory
+      file:
+        path: /opt/app
+        state: directory
+
+    - name: Copy application code
+      copy:
+        src: app/
+        dest: /opt/app/
+
+    - name: Create virtual environment
+      command: python3 -m venv /opt/venv
+      args:
+        creates: /opt/venv
+
+    - name: Install Flask and Gunicorn in venv
+      pip:
+        name:
+          - flask
+          - gunicorn
+        virtualenv: /opt/venv
+
+    # ✅ SAFE PROCESS STOP (NO pkill errors)
+
+    - name: Check if gunicorn is running
+      shell: pgrep -f gunicorn
+      register: gunicorn_process
+      ignore_errors: yes
+
+    - name: Stop gunicorn process if running
+      shell: kill {{ gunicorn_process.stdout }}
+      when: gunicorn_process.stdout != ""
+      ignore_errors: yes
+
+    - name: Start Flask app with Gunicorn
+      shell: |
+        nohup /opt/venv/bin/gunicorn -w 2 -b 0.0.0.0:8080 app:app > /opt/app/app.log 2>&1 &
+      args:
+        chdir: /opt/app

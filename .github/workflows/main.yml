@@ -1,0 +1,81 @@
+name: Full DevOps Pipeline (Terraform + Ansible + Flask App)
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+
+  deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+
+    # -----------------------------
+    # 1. Checkout Code
+    # -----------------------------
+    - name: Checkout repository
+      uses: actions/checkout@v4
+
+    # -----------------------------
+    # 2. Setup Python (for validation)
+    # -----------------------------
+    - name: Setup Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: "3.10"
+
+    - name: Install app dependencies (test stage)
+      run: |
+        pip install -r app/requirements.txt
+
+    # -----------------------------
+    # 3. Setup Terraform
+    # -----------------------------
+    - name: Setup Terraform
+      uses: hashicorp/setup-terraform@v3
+
+    - name: Terraform Init
+      working-directory: terraform
+      run: terraform init
+
+    - name: Terraform Apply
+      working-directory: terraform
+      run: terraform apply -auto-approve
+      env:
+        AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+        AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+        AWS_REGION: ap-south-1
+
+    # -----------------------------
+    # 4. Extract Terraform Outputs
+    # -----------------------------
+    - name: Generate Inventory from Terraform
+      working-directory: terraform
+      run: |
+        terraform output -json > output.json
+
+    # -----------------------------
+    # 5. Setup SSH Key
+    # -----------------------------
+    - name: Setup SSH Key
+      run: |
+        echo "${{ secrets.SSH_PRIVATE_KEY }}" > key.pem
+        chmod 400 key.pem
+
+    # -----------------------------
+    # 6. Install Ansible
+    # -----------------------------
+    - name: Install Ansible
+      run: |
+        sudo apt update
+        sudo apt install ansible -y
+
+    # -----------------------------
+    # 7. Run Ansible (deploy Flask app)
+    # -----------------------------
+    - name: Run Ansible Playbook
+      working-directory: ansible
+      run: |
+        ansible-playbook -i inventory.ini main.yml
