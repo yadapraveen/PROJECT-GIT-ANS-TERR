@@ -33,16 +33,18 @@ jobs:
         working-directory: app
         run: python -c "from app import app; print('Flask app loaded successfully')"
 
-      - name: Install Ansible
+      - name: Install Ansible and jq
         run: |
           python -m pip install ansible
+          sudo apt-get update
+          sudo apt-get install -y jq
 
       - name: Configure AWS Credentials
         uses: aws-actions/configure-aws-credentials@v4
         with:
           aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          aws-region: ap-south-1
+          aws-region: us-east-1
 
       - name: Set up Terraform
         uses: hashicorp/setup-terraform@v3
@@ -51,46 +53,75 @@ jobs:
         working-directory: terraform
         run: terraform init
 
-      - name: Terraform Destroy
+      - name: Terraform Destroy + Apply with Auto Cleanup
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         working-directory: terraform
-        run: terraform destroy -auto-approve
+        run: |
+          terraform destroy -auto-approve || true
+          if ! terraform apply -auto-approve; then
+            echo "Terraform apply failed. Running cleanup..."
+            terraform destroy -auto-approve || true
+            exit 1
+          fi
 
-      - name: Terraform Apply
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-        working-directory: terraform
-        run: terraform apply -auto-approve
-
-      - name: Get Master IP
+      - name: Get Terraform Outputs
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         working-directory: terraform
         run: |
           MASTER_IP=$(terraform output -raw master_ip)
           echo "MASTER_IP=$MASTER_IP" >> $GITHUB_ENV
+
+          SLAVE1_IP=$(terraform output -json slave_ips | jq -r '.[0]')
+          SLAVE2_IP=$(terraform output -json slave_ips | jq -r '.[1]')
+
+          echo "SLAVE1_IP=$SLAVE1_IP" >> $GITHUB_ENV
+          echo "SLAVE2_IP=$SLAVE2_IP" >> $GITHUB_ENV
+
           echo "Master IP: $MASTER_IP"
+          echo "Slave 1 IP: $SLAVE1_IP"
+          echo "Slave 2 IP: $SLAVE2_IP"
 
       - name: Create SSH key file
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         run: |
-          echo "${{ secrets.EC2_SSH_PRIVATE_KEY }}" > private_key.pem
-          chmod 600 private_key.pem
+          echo "${{ secrets.EC2_SSH_PRIVATE_KEY }}" > rakshitha.pem
+          chmod 600 rakshitha.pem
+          ls -l rakshitha.pem
 
       - name: Update Ansible inventory dynamically
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         run: |
+          echo "Inventory file location check:"
+          pwd
+          ls -la ansible
+
           cat > ansible/inventory.ini <<EOF
           [master]
-          $MASTER_IP ansible_user=ec2-user ansible_ssh_private_key_file=../private_key.pem ansible_ssh_common_args='-o StrictHostKeyChecking=no'
+          $MASTER_IP
+
+          [slave]
+          $SLAVE1_IP
+          $SLAVE2_IP
+
+          [all:vars]
+          ansible_user=ubuntu
+          ansible_ssh_private_key_file=../rakshitha.pem
+          ansible_ssh_common_args='-o StrictHostKeyChecking=no'
           EOF
 
-          echo "Generated inventory:"
+          echo "Generated inventory file:"
           cat ansible/inventory.ini
 
       - name: Wait for EC2 to be ready
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         run: |
-          echo "Waiting for EC2 boot..."
-          sleep 60
+          echo "Waiting for EC2 boot and SSH..."
+          sleep 90
+
+      - name: Test SSH manually
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        run: |
+          ssh -o StrictHostKeyChecking=no -i rakshitha.pem ubuntu@$MASTER_IP "echo SSH success"
 
       - name: Test Ansible connection
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
