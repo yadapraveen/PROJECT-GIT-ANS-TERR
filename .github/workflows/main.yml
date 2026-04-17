@@ -9,29 +9,49 @@ jobs:
   build:
     runs-on: ubuntu-latest
 
-    defaults:
-      run:
-        working-directory: app
-
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+
+      - name: Show repo structure
+        run: |
+          pwd
+          ls -la
+          find . -maxdepth 4 -type f
 
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
           python-version: '3.11'
 
-      - name: Debug
-        run: |
-          pwd
-          ls -la
-          find .. -maxdepth 3 -type f
-
-      - name: Install dependencies
+      - name: Install Python dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install -r requirements.txt
+          pip install -r app/requirements.txt
 
-      - name: Run app test
-        run: python app.py
+      - name: Validate Flask app
+        working-directory: app
+        run: python -c "from app import app; print('Flask app loaded successfully')"
+
+      - name: Set up Terraform
+        uses: hashicorp/setup-terraform@v3
+
+      - name: Terraform Init
+        working-directory: terraform
+        run: terraform init
+
+      - name: Terraform Validate
+        working-directory: terraform
+        run: terraform validate
+
+      - name: Terraform Format Check
+        working-directory: terraform
+        run: terraform fmt -check
+
+      - name: Install Ansible
+        run: |
+          python -m pip install ansible
+
+      - name: Check Ansible Playbook Syntax
+        working-directory: ansible
+        run: ansible-playbook --syntax-check -i inventory.ini main.yml
